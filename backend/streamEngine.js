@@ -1,3 +1,4 @@
+
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const path = require('path');
@@ -9,7 +10,8 @@ const activeStreams = new Map();
 // Helper to write playlist file for Concat Demuxer
 const generatePlaylist = (userId, filePaths) => {
     const playlistPath = path.join(__dirname, 'uploads', `playlist_${userId}.txt`);
-    const content = filePaths.map(p => `file '${p}'`).join('\n');
+    // Escape single quotes for ffmpeg concat file structure to prevent errors
+    const content = filePaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
     fs.writeFileSync(playlistPath, content);
     return playlistPath;
 };
@@ -50,7 +52,11 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
             .input(coverPath)
             .inputOptions(['-loop 1']) // Loop image
             .input(playlistPath)
-            .inputOptions(['-f concat', '-safe 0']) // Concat Demuxer
+            .inputOptions([
+                '-re',       // Read input at native frame rate (CRITICAL for RTMP)
+                '-f concat', 
+                '-safe 0'
+            ]) 
             .outputOptions([
                 '-map 0:v', '-map 1:a', // Video from image, Audio from playlist
                 '-shortest', // Stop when audio ends
@@ -61,7 +67,11 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
         // Video Mode
         command
             .input(playlistPath)
-            .inputOptions(['-f concat', '-safe 0']);
+            .inputOptions([
+                '-re',       // Read input at native frame rate
+                '-f concat', 
+                '-safe 0'
+            ]);
     } else {
         throw new Error("Invalid media type for streaming.");
     }
@@ -91,7 +101,9 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
             activeStreams.set(userId, { command, startTime: Date.now() });
         })
         .on('stderr', (stderrLine) => {
-            // Send logs to frontend (debounced ideally, but raw here for simplicity)
+            // Log to console so it appears in PM2 logs
+            console.error(`${logPrefix} Log: ${stderrLine}`);
+            // Send to frontend
             io.to(`user_${userId}`).emit('stream:log', stderrLine);
         })
         .on('error', (err) => {
@@ -130,3 +142,4 @@ const getStreamStatus = (userId) => {
 };
 
 module.exports = { startStream, stopStream, getStreamStatus };
+    
