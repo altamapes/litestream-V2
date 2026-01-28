@@ -50,16 +50,17 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
 
         command
             .input(coverPath)
-            .inputOptions(['-loop 1']) // Loop image
+            .inputOptions(['-loop 1']) // Loop image infinitely
             .input(playlistPath)
             .inputOptions([
-                '-re',       // Read input at native frame rate (CRITICAL for RTMP)
+                '-stream_loop -1', // LOOP PLAYLIST INFINITELY (Fixes stream ending)
+                '-re',             // Read input at native frame rate
                 '-f concat', 
                 '-safe 0'
             ]) 
             .outputOptions([
                 '-map 0:v', '-map 1:a', // Video from image, Audio from playlist
-                '-shortest', // Stop when audio ends
+                '-shortest', // This now waits for the shortest INFINITE stream (so it runs forever)
                 '-pix_fmt yuv420p'
             ]);
 
@@ -68,7 +69,8 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
         command
             .input(playlistPath)
             .inputOptions([
-                '-re',       // Read input at native frame rate
+                '-stream_loop -1', // LOOP PLAYLIST INFINITELY
+                '-re', 
                 '-f concat', 
                 '-safe 0'
             ]);
@@ -101,14 +103,15 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
             activeStreams.set(userId, { command, startTime: Date.now() });
         })
         .on('stderr', (stderrLine) => {
-            // Log to console so it appears in PM2 logs
             console.error(`${logPrefix} Log: ${stderrLine}`);
-            // Send to frontend
             io.to(`user_${userId}`).emit('stream:log', stderrLine);
         })
         .on('error', (err) => {
             console.error(`${logPrefix} Error: ${err.message}`);
-            io.to(`user_${userId}`).emit('stream:status', { status: 'error', log: err.message });
+            // Only emit error if it wasn't a manual kill
+            if (!err.message.includes('SIGKILL')) {
+                io.to(`user_${userId}`).emit('stream:status', { status: 'error', log: err.message });
+            }
             activeStreams.delete(userId);
             // Cleanup playlist
             if (fs.existsSync(playlistPath)) fs.unlinkSync(playlistPath);
@@ -127,6 +130,7 @@ const stopStream = (userId) => {
     if (activeStreams.has(userId)) {
         const { command } = activeStreams.get(userId);
         try {
+            // Send SIGKILL to force stop ffmpeg immediately
             command.kill('SIGKILL');
         } catch (e) {
             console.error("Error killing stream:", e);
@@ -142,4 +146,3 @@ const getStreamStatus = (userId) => {
 };
 
 module.exports = { startStream, stopStream, getStreamStatus };
-    
