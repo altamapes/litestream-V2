@@ -1,0 +1,5 @@
+{
+  "name": "LiteStream",
+  "description": "Lightweight Multi-Platform Streaming Server for Low-End VPS",
+  "requestFramePermissions": []
+}

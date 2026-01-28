@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiteStream</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: sans-serif; }
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .scroll-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- LOGIN SCREEN -->
+    <div id="auth-view" class="h-full flex items-center justify-center">
+        <div class="glass p-8 rounded-xl w-96 shadow-2xl">
+            <h1 class="text-3xl font-bold mb-6 text-center text-blue-400">LiteStream</h1>
+            <div class="space-y-4">
+                <input type="text" id="auth-user" placeholder="Username" class="w-full p-3 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 outline-none">
+                <input type="password" id="auth-pass" placeholder="Password" class="w-full p-3 rounded bg-slate-800 border border-slate-700 focus:border-blue-500 outline-none">
+                <button onclick="app.login()" class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded font-bold transition">Login</button>
+                <button onclick="app.register()" class="w-full border border-slate-600 hover:bg-slate-800 py-3 rounded font-bold transition">Register</button>
+                <p id="auth-msg" class="text-red-400 text-center text-sm"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="dashboard-view" class="hidden h-full flex">
+        <!-- Sidebar -->
+        <div class="w-64 glass border-r border-slate-700 flex flex-col justify-between p-4">
+            <div>
+                <h2 class="text-2xl font-bold text-blue-400 mb-8 px-2">LiteStream</h2>
+                <nav class="space-y-2">
+                    <button onclick="app.setTab('overview')" class="w-full text-left p-3 rounded hover:bg-slate-800 transition flex items-center gap-2">📊 Overview</button>
+                    <button onclick="app.setTab('library')" class="w-full text-left p-3 rounded hover:bg-slate-800 transition flex items-center gap-2">📁 Media Library</button>
+                    <button onclick="app.setTab('stream')" class="w-full text-left p-3 rounded hover:bg-slate-800 transition flex items-center gap-2">📡 Stream Control</button>
+                </nav>
+            </div>
+            <div class="border-t border-slate-700 pt-4">
+                <div id="user-info" class="text-sm text-slate-400 mb-2"></div>
+                <button onclick="app.logout()" class="w-full text-left p-2 text-red-400 hover:text-red-300">Logout</button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 overflow-auto p-8 relative">
+            
+            <!-- Tab: Overview -->
+            <div id="tab-overview" class="hidden">
+                <h2 class="text-3xl font-bold mb-6">Overview</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="glass p-6 rounded-xl">
+                        <h3 class="text-slate-400 text-sm">Storage Usage</h3>
+                        <p id="stat-storage" class="text-2xl font-bold mt-2">Loading...</p>
+                        <div class="w-full bg-slate-800 h-2 mt-4 rounded-full overflow-hidden">
+                            <div id="bar-storage" class="bg-blue-500 h-full w-0 transition-all duration-500"></div>
+                        </div>
+                    </div>
+                    <div class="glass p-6 rounded-xl">
+                        <h3 class="text-slate-400 text-sm">Plan</h3>
+                        <p id="stat-plan" class="text-2xl font-bold mt-2">Loading...</p>
+                    </div>
+                    <div class="glass p-6 rounded-xl">
+                        <h3 class="text-slate-400 text-sm">Server Status</h3>
+                        <p class="text-2xl font-bold mt-2 text-green-400">Online</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Library -->
+            <div id="tab-library" class="hidden">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-3xl font-bold">Media Library</h2>
+                    <label class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded cursor-pointer transition">
+                        <span>+ Upload Media</span>
+                        <input type="file" id="file-upload" class="hidden" onchange="app.uploadFile()">
+                    </label>
+                </div>
+                <div id="upload-status" class="hidden mb-4 p-3 bg-blue-900/50 text-blue-200 rounded">Uploading...</div>
+                
+                <div id="media-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    <!-- Media Items Injected Here -->
+                </div>
+            </div>
+
+            <!-- Tab: Stream -->
+            <div id="tab-stream" class="hidden h-full flex flex-col">
+                <h2 class="text-3xl font-bold mb-6">Stream Control</h2>
+                
+                <div class="grid grid-cols-3 gap-6 h-full">
+                    <!-- Config -->
+                    <div class="col-span-1 glass p-6 rounded-xl flex flex-col gap-4 h-fit">
+                        <div>
+                            <label class="block text-sm text-slate-400 mb-1">RTMP Server URL + Key</label>
+                            <input type="text" id="rtmp-url" placeholder="rtmp://a.rtmp.youtube.com/live2/key..." class="w-full p-2 bg-slate-800 border border-slate-700 rounded outline-none focus:border-blue-500">
+                        </div>
+                        
+                        <div class="border-t border-slate-700 pt-4">
+                            <h3 class="font-bold mb-2">Selected Media</h3>
+                            <div id="selected-media-list" class="space-y-2 text-sm text-slate-300 max-h-48 overflow-y-auto mb-2">
+                                <p class="text-slate-500 italic">Select files from Library tab (click to select)</p>
+                            </div>
+                            <button onclick="app.clearSelection()" class="text-xs text-red-400 underline">Clear Selection</button>
+                        </div>
+
+                         <div id="cover-select-area" class="hidden border-t border-slate-700 pt-4">
+                            <h3 class="font-bold mb-2">Cover Image (Radio Mode)</h3>
+                             <select id="cover-select" class="w-full p-2 bg-slate-800 border border-slate-700 rounded text-sm">
+                                 <option value="">Select an Image...</option>
+                             </select>
+                        </div>
+
+                        <button id="btn-start-stream" onclick="app.startStream()" class="w-full py-3 bg-green-600 hover:bg-green-700 rounded font-bold shadow-lg transition">Go Live</button>
+                        <button id="btn-stop-stream" onclick="app.stopStream()" class="hidden w-full py-3 bg-red-600 hover:bg-red-700 rounded font-bold shadow-lg transition">Stop Stream</button>
+                    </div>
+
+                    <!-- Logs -->
+                    <div class="col-span-2 glass p-4 rounded-xl flex flex-col">
+                        <h3 class="font-bold mb-2 text-slate-400">Live Logs (FFmpeg)</h3>
+                        <div id="stream-logs" class="flex-1 bg-black/50 rounded p-2 font-mono text-xs text-green-400 overflow-y-auto h-96 whitespace-pre-wrap">Waiting for stream...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const app = {
+            socket: null,
+            user: null,
+            media: [],
+            selectedMedia: [], // IDs
+            currentTab: 'overview',
+
+            init: async () => {
+                try {
+                    app.socket = io();
+                } catch (e) {
+                    console.error("Socket.io failed to initialize:", e);
+                }
+                
+                // Check session
+                try {
+                    const res = await fetch('/api/me');
+                    if (res.ok) {
+                        app.user = await res.json();
+                        app.initDashboard();
+                    }
+                } catch (e) { console.log('Not logged in'); }
+
+                // Socket Listeners
+                if (app.socket) {
+                    app.socket.on('stream:log', (log) => {
+                        const el = document.getElementById('stream-logs');
+                        el.innerHTML += log + '\n';
+                        el.scrollTop = el.scrollHeight;
+                    });
+
+                    app.socket.on('stream:status', (data) => {
+                        if (data.status === 'live') {
+                            document.getElementById('btn-start-stream').classList.add('hidden');
+                            document.getElementById('btn-stop-stream').classList.remove('hidden');
+                        } else if (data.status === 'offline') {
+                            document.getElementById('btn-start-stream').classList.remove('hidden');
+                            document.getElementById('btn-stop-stream').classList.add('hidden');
+                        }
+                    });
+                }
+            },
+
+            // --- AUTH ---
+            login: async () => {
+                const u = document.getElementById('auth-user').value;
+                const p = document.getElementById('auth-pass').value;
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: u, password: p})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    app.user = data.user;
+                    location.reload(); // Simple reload to refresh state
+                } else {
+                    document.getElementById('auth-msg').innerText = data.error;
+                }
+            },
+
+            register: async () => {
+                const u = document.getElementById('auth-user').value;
+                const p = document.getElementById('auth-pass').value;
+                const res = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: u, password: p})
+                });
+                const data = await res.json();
+                if(data.success) alert("Registered! Please login.");
+                else alert(data.error);
+            },
+
+            logout: async () => {
+                await fetch('/api/logout', { method: 'POST' });
+                location.reload();
+            },
+
+            // --- UI LOGIC ---
+            initDashboard: async () => {
+                document.getElementById('auth-view').classList.add('hidden');
+                document.getElementById('dashboard-view').classList.remove('hidden');
+                document.getElementById('user-info').innerText = `Logged in as: ${app.user.username}`;
+                
+                await app.refreshMedia();
+                app.updateOverview();
+                app.checkStreamStatus();
+                app.setTab('overview');
+            },
+
+            setTab: (tab) => {
+                ['overview', 'library', 'stream'].forEach(t => {
+                    document.getElementById(`tab-${t}`).classList.add('hidden');
+                });
+                document.getElementById(`tab-${tab}`).classList.remove('hidden');
+                app.currentTab = tab;
+            },
+
+            // --- DATA ---
+            updateOverview: async () => {
+                // Fetch fresh user data
+                const res = await fetch('/api/me');
+                app.user = await res.json();
+                
+                const mbUsed = (app.user.current_storage / 1024 / 1024).toFixed(2);
+                const mbTotal = (app.user.max_storage / 1024 / 1024).toFixed(2);
+                const percent = (app.user.current_storage / app.user.max_storage) * 100;
+
+                document.getElementById('stat-storage').innerText = `${mbUsed} MB / ${mbTotal} MB`;
+                document.getElementById('bar-storage').style.width = `${percent}%`;
+                document.getElementById('stat-plan').innerText = app.user.plan_name;
+            },
+
+            refreshMedia: async () => {
+                const res = await fetch('/api/media');
+                app.media = await res.json();
+                app.renderMediaGrid();
+                app.updateCoverSelect();
+            },
+
+            renderMediaGrid: () => {
+                const grid = document.getElementById('media-grid');
+                grid.innerHTML = '';
+                
+                app.media.forEach(m => {
+                    const isSelected = app.selectedMedia.includes(m.id);
+                    const div = document.createElement('div');
+                    div.className = `glass p-2 rounded relative group cursor-pointer border ${isSelected ? 'border-blue-500 bg-blue-900/20' : 'border-transparent'}`;
+                    div.onclick = (e) => {
+                        if(e.target.closest('button')) return; // Ignore button clicks
+                        app.toggleSelectMedia(m);
+                    };
+
+                    let preview = '';
+                    if (m.type === 'image') preview = `<img src="/uploads/${m.filename}" class="w-full h-32 object-cover rounded mb-2">`;
+                    else if (m.type === 'video' && m.thumbnail_path) {
+                        const thumb = m.thumbnail_path.split(/[/\\]/).pop();
+                        preview = `<img src="/uploads/${thumb}" class="w-full h-32 object-cover rounded mb-2">`;
+                    } else {
+                        preview = `<div class="w-full h-32 bg-slate-800 flex items-center justify-center rounded mb-2"><span class="text-2xl">🎵</span></div>`;
+                    }
+
+                    div.innerHTML = `
+                        ${preview}
+                        <div class="text-xs truncate font-bold" title="${m.filename}">${m.filename}</div>
+                        <div class="text-xs text-slate-400 flex justify-between mt-1">
+                            <span>${(m.size/1024/1024).toFixed(1)}MB</span>
+                            <span>${m.type.toUpperCase()}</span>
+                        </div>
+                        <div class="absolute top-2 right-2 flex gap-1">
+                             <button onclick="app.toggleLock(${m.id})" class="p-1 bg-black/50 rounded hover:bg-white/20 text-xs">
+                                ${m.locked ? '🔒' : '🔓'}
+                            </button>
+                            <button onclick="app.deleteMedia(${m.id})" class="p-1 bg-red-600/80 rounded hover:bg-red-500 text-xs text-white ${m.locked ? 'hidden':''}">
+                                🗑
+                            </button>
+                        </div>
+                    `;
+                    grid.appendChild(div);
+                });
+            },
+
+            updateCoverSelect: () => {
+                const sel = document.getElementById('cover-select');
+                sel.innerHTML = '<option value="">Select an Image...</option>';
+                app.media.filter(m => m.type === 'image').forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.innerText = m.filename;
+                    sel.appendChild(opt);
+                });
+            },
+
+            // --- ACTIONS ---
+            uploadFile: async () => {
+                const input = document.getElementById('file-upload');
+                if (!input.files[0]) return;
+                
+                const formData = new FormData();
+                formData.append('file', input.files[0]);
+
+                document.getElementById('upload-status').classList.remove('hidden');
+                
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                document.getElementById('upload-status').classList.add('hidden');
+                
+                if (res.ok) {
+                    await app.refreshMedia();
+                    app.updateOverview();
+                } else {
+                    const d = await res.json();
+                    alert(d.error);
+                }
+                input.value = '';
+            },
+
+            toggleLock: async (id) => {
+                await fetch(`/api/media/${id}/toggle-lock`, { method: 'POST' });
+                app.refreshMedia();
+            },
+
+            deleteMedia: async (id) => {
+                if(!confirm('Delete this file?')) return;
+                const res = await fetch(`/api/media/${id}`, { method: 'DELETE' });
+                if(res.ok) {
+                    app.refreshMedia();
+                    app.updateOverview();
+                    // Remove from selection if exists
+                    app.selectedMedia = app.selectedMedia.filter(mid => mid !== id);
+                    app.renderSelectionList();
+                }
+            },
+
+            // --- STREAMING ---
+            toggleSelectMedia: (media) => {
+                if (app.selectedMedia.includes(media.id)) {
+                    app.selectedMedia = app.selectedMedia.filter(id => id !== media.id);
+                } else {
+                    // Check type consistency
+                    if (app.selectedMedia.length > 0) {
+                        const firstId = app.selectedMedia[0];
+                        const firstMedia = app.media.find(m => m.id === firstId);
+                        if (firstMedia.type !== media.type) {
+                            alert("Please select only Audio OR only Video files for a stream.");
+                            return;
+                        }
+                    }
+                    if (media.type === 'image') return; // Images only for covers
+                    app.selectedMedia.push(media.id);
+                }
+                app.renderMediaGrid();
+                app.renderSelectionList();
+            },
+
+            renderSelectionList: () => {
+                const list = document.getElementById('selected-media-list');
+                const coverArea = document.getElementById('cover-select-area');
+                
+                if (app.selectedMedia.length === 0) {
+                    list.innerHTML = '<p class="text-slate-500 italic">No media selected.</p>';
+                    coverArea.classList.add('hidden');
+                    return;
+                }
+
+                const firstMedia = app.media.find(m => m.id === app.selectedMedia[0]);
+                // Show cover select only if audio mode
+                if (firstMedia && firstMedia.type === 'audio') {
+                    coverArea.classList.remove('hidden');
+                } else {
+                    coverArea.classList.add('hidden');
+                }
+
+                list.innerHTML = app.selectedMedia.map(id => {
+                    const m = app.media.find(x => x.id === id);
+                    return `<div class="bg-slate-800 p-1 rounded px-2 flex justify-between">${m.filename}</div>`;
+                }).join('');
+            },
+
+            clearSelection: () => {
+                app.selectedMedia = [];
+                app.renderMediaGrid();
+                app.renderSelectionList();
+            },
+
+            startStream: async () => {
+                const rtmp = document.getElementById('rtmp-url').value;
+                if (!rtmp) return alert("Enter RTMP URL");
+                if (app.selectedMedia.length === 0) return alert("Select media first");
+
+                const firstMedia = app.media.find(m => m.id === app.selectedMedia[0]);
+                let coverId = null;
+                
+                if (firstMedia.type === 'audio') {
+                    coverId = document.getElementById('cover-select').value;
+                    if (!coverId) return alert("Audio stream requires a Cover Image.");
+                }
+
+                const btn = document.getElementById('btn-start-stream');
+                btn.disabled = true;
+                btn.innerText = "Starting...";
+
+                const res = await fetch('/api/stream/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        rtmpUrl: rtmp,
+                        mediaIds: app.selectedMedia,
+                        coverImageId: coverId
+                    })
+                });
+
+                const data = await res.json();
+                if (!data.success) {
+                    alert("Error: " + data.error);
+                    btn.disabled = false;
+                    btn.innerText = "Go Live";
+                }
+            },
+
+            stopStream: async () => {
+                await fetch('/api/stream/stop', { method: 'POST' });
+            },
+
+            checkStreamStatus: async () => {
+                const res = await fetch('/api/stream/status');
+                const data = await res.json();
+                if (data.status === 'live') {
+                    document.getElementById('btn-start-stream').classList.add('hidden');
+                    document.getElementById('btn-stop-stream').classList.remove('hidden');
+                }
+            }
+        };
+
+        window.onload = app.init;
+    </script>
+</body>
+</html>
