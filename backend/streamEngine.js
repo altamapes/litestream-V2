@@ -53,15 +53,18 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
             .inputOptions(['-loop 1']) // Loop image infinitely
             .input(playlistPath)
             .inputOptions([
-                '-stream_loop -1', // LOOP PLAYLIST INFINITELY (Fixes stream ending)
                 '-re',             // Read input at native frame rate
+                '-stream_loop -1', // LOOP PLAYLIST INFINITELY
                 '-f concat', 
                 '-safe 0'
             ]) 
             .outputOptions([
                 '-map 0:v', '-map 1:a', // Video from image, Audio from playlist
-                '-shortest', // This now waits for the shortest INFINITE stream (so it runs forever)
-                '-pix_fmt yuv420p'
+                // REMOVED '-shortest' here. 
+                // Why: It kills the stream when playlist reaches end-of-file before looping.
+                // Without it, the stream runs forever based on the image loop.
+                '-pix_fmt yuv420p',
+                '-fflags +genpts' // Regenerate timestamps for smooth looping
             ]);
 
     } else if (firstType === 'video') {
@@ -69,10 +72,13 @@ const startStream = async (userId, rtmpUrl, mediaIds, coverImageId, io) => {
         command
             .input(playlistPath)
             .inputOptions([
-                '-stream_loop -1', // LOOP PLAYLIST INFINITELY
                 '-re', 
+                '-stream_loop -1', // LOOP PLAYLIST INFINITELY
                 '-f concat', 
                 '-safe 0'
+            ])
+            .outputOptions([
+                '-fflags +genpts' // Regenerate timestamps
             ]);
     } else {
         throw new Error("Invalid media type for streaming.");
